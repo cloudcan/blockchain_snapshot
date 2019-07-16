@@ -1,0 +1,7 @@
+spring:
+  jpa:
+    database: mysql
+  datasource:
+    username: root
+    password: root
+    url: jdbc:mysql://127.0.0.1:3306/testdb?useUnicode=true&useSSL=true&verifyServerCertificate=false&characterEncoding=UTF-8
