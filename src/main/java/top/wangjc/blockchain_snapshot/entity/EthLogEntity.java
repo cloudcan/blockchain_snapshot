@@ -15,6 +15,7 @@ public class EthLogEntity {
     private BigInteger startBlock;
     private BigInteger endBlock;
     private Date createDate;
+    private Boolean success;
 
     public EthLogEntity(BigInteger startBlock, BigInteger endBlock) {
         this.startBlock = startBlock;

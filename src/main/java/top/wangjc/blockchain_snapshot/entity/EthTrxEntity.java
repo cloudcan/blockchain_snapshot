@@ -20,7 +20,7 @@ public class EthTrxEntity {
     private String blockHash;
     private BigInteger blockNumber;
     @Column(name = "trx_index")
-    private BigInteger transactionIndex;
+    private BigInteger trxIndex;
     private String trxFrom;
     private String trxTo;
     private BigInteger trxValue;

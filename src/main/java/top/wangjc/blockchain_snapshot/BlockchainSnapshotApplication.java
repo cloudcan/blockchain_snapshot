@@ -5,9 +5,11 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.ApplicationEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
 import top.wangjc.blockchain_snapshot.service.impl.EthSnapshotServiceImpl;
 
 @SpringBootApplication
+@EnableTransactionManagement
 public class BlockchainSnapshotApplication {
 
     public static void main(String[] args) {

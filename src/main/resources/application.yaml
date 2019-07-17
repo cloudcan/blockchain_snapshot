@@ -7,5 +7,6 @@ spring:
     url: jdbc:mysql://127.0.0.1:3306/testdb?useUnicode=true&useSSL=true&verifyServerCertificate=false&characterEncoding=UTF-8
 eth:
   rpcAddr: http://192.168.0.200:8545
-  batchSize: 200
-  startBlock: 0
+  batchSize: 1000
+  startBlock: 3000000
+  endBlock: 3500000
