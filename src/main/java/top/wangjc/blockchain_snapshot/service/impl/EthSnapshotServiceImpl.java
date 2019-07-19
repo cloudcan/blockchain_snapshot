@@ -7,39 +7,44 @@ import io.reactivex.schedulers.Schedulers;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+import org.springframework.context.ApplicationListener;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.stereotype.Service;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.Request;
 import org.web3j.protocol.core.methods.response.EthBlock;
+import org.web3j.protocol.core.methods.response.EthGetBalance;
 import org.web3j.protocol.core.methods.response.Transaction;
 import org.web3j.utils.Async;
 import org.web3j.utils.Flowables;
 import org.web3j.utils.Numeric;
+import top.wangjc.blockchain_snapshot.dto.EthBalance;
+import top.wangjc.blockchain_snapshot.dto.EthUsdtBalance;
 import top.wangjc.blockchain_snapshot.entity.EthAccountEntity;
-import top.wangjc.blockchain_snapshot.entity.EthLogEntity;
+import top.wangjc.blockchain_snapshot.entity.OperationLogEntity;
 import top.wangjc.blockchain_snapshot.repository.EthAccountRepository;
-import top.wangjc.blockchain_snapshot.repository.EthLogRepository;
-import top.wangjc.blockchain_snapshot.repository.EthTrxRepository;
+import top.wangjc.blockchain_snapshot.repository.EthTransactionRepository;
 import top.wangjc.blockchain_snapshot.repository.NativeSqlRepository;
+import top.wangjc.blockchain_snapshot.repository.OperationLogRepository;
 
 import java.io.IOException;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Set;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-@Component
+@Service
 @Slf4j
-public class EthSnapshotServiceImpl extends AbstractSnapshotService {
+public class EthSnapshotServiceImpl extends AbstractSnapshotService implements ApplicationListener<ContextClosedEvent> {
 
-    @Value("${eth.rpcAddr}")
-    private String rpcAddr;
+    @Value("${eth.httpAddr}")
+    private String httpAddr;
     @Value("${eth.batchSize}")
     private int batchSize;
     @Value("${eth.startBlock:}")
@@ -47,24 +52,30 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService {
     @Value("${eth.endBlock:}")
     private BigInteger endBlock;
 
+    public static ChainType chainType = ChainType.Ethereum;
     private final ScheduledExecutorService scheduledExecutorService = Async.defaultExecutorService();
     // 批量处理区块数量
     private EnhanceHttpServiceImpl httpService;
     private Web3j web3Client;
     private Scheduler scheduler;
-    private Map<String, EthAccountEntity> accounts = new ConcurrentHashMap<>();
+    // 找到的账户
+    private Set<String> foundAddress = new ConcurrentSkipListSet<>();
     private long taskStartMill;
 
 
     @Autowired
-    private EthTrxRepository ethTrxRepository;
+    private EthTransactionRepository ethTransactionRepository;
     @Autowired
-    private EthLogRepository ethLogRepository;
+    private OperationLogRepository operationLogRepository;
     @Autowired
     private EthAccountRepository ethAccountRepository;
 
     @Autowired
     private NativeSqlRepository nativeSqlRepository;
+    // usdt 合约地址
+    private final static String USDT_CONTRACT_ADDRESS = "0xdac17f958d2ee523a2206206994597c13d831ec7";
+    // usdt 余额方法
+    private final static String USDT_BALANCE_METHOD = "0x27e235e3000000000000000000000000";
 
     /**
      * 重放区块
@@ -90,20 +101,17 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService {
      * 日志处理完成
      */
     private void handleLogComplete() {
-        log.info("================= replay  complete ,total cost:{} s,get {} accounts!===============", (System.currentTimeMillis() - taskStartMill) / 1000, accounts.size());
-        long s = System.currentTimeMillis();
-        ethAccountRepository.saveAll(accounts.values());
-        log.info("================= save accounts complete,cost:{} s,=======================", (System.currentTimeMillis() - s) / 1000);
+        log.info("================= replay  complete ,total cost:{} s,get {} foundAddress!===============", (System.currentTimeMillis() - taskStartMill) / 1000, foundAddress.size());
         stop();
     }
 
     /**
      * 记录日志
      *
-     * @param ethLogEntity
+     * @param operationLogEntity
      */
-    private void handleLog(EthLogEntity ethLogEntity) {
-        ethLogRepository.save(ethLogEntity);
+    private void handleLog(OperationLogEntity operationLogEntity) {
+        operationLogRepository.save(operationLogEntity);
     }
 
     /**
@@ -112,27 +120,39 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService {
      * @param batch
      * @return
      */
-    private EthLogEntity handleBatchBlock(List<BigInteger> batch) {
-        EthLogEntity ethLogEntity = new EthLogEntity(batch.get(0), batch.get(batch.size() - 1));
+    private OperationLogEntity handleBatchBlock(List<BigInteger> batch) {
+        log.info("=======start handle {}-{} block ===========", batch.get(0), batch.get(batch.size() - 1));
+        OperationLogEntity operationLogEntity = new OperationLogEntity(batch.get(0), batch.get(batch.size() - 1), chainType);
         try {
+            // 账号信息
+            List<EthAccountEntity> accountEntities = new ArrayList<>();
             Flowable.just(batch)
-                    .map(this::generateRequests)
-                    .map(this::getEthBlocks)
+                    .map(this::generateBlockRequests)
+                    .map(this::getBatchEthBlocks)
                     .retry(3)
                     .map(this::batchToTransactions)
-                    .subscribe(this::handleTransactions, this::handleError, () -> log.info("======handle {}-{} batch block complete=======", batch.get(0), batch.get(batch.size() - 1)));
+                    .subscribe(transactions -> {
+                        long start = System.currentTimeMillis();
+                        List<String> addresses = new ArrayList<>();
+                        transactions.forEach(transaction -> {
+                            String address = transaction.getTo();
+                            if (address != null && !foundAddress.contains(address)) {
+                                foundAddress.add(address);
+                                addresses.add(address);
+                            }
+                        });
+                        // 批量获取账号信息
+                        Flowable.fromIterable(addresses).buffer(1000).map(this::getBatchAccountInfo).subscribe(accounts -> accountEntities.addAll(accounts));
+                        log.info("get {} accounts from transactions ,cost:{} ms", accountEntities.size(), (System.currentTimeMillis() - start));
+                    }, this::handleError, () -> {
+                        log.info("======wait save=======");
+                        ethAccountRepository.saveAll(accountEntities);
+                        log.info("======handle {}-{} batch block complete=======", batch.get(0), batch.get(batch.size() - 1));
+                    });
         } catch (Exception e) {
             log.error("批量处理区块失败:", e);
         }
-        ethLogEntity.setSuccess(true);
-        return ethLogEntity;
-    }
-
-    /**
-     * 交易处理完成
-     */
-    private void handleTransactionComplete() {
-
+        return operationLogEntity;
     }
 
     /**
@@ -143,7 +163,7 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService {
     private BigInteger getStartBlock() {
         BigInteger start = BigInteger.ZERO;
         if (startBlock == null) {
-            EthLogEntity lastLog = ethLogRepository.findLastLog();
+            OperationLogEntity lastLog = operationLogRepository.findLastLogByChainType(chainType);
             if (lastLog != null && lastLog.getEndBlock() != null) {
                 start = lastLog.getEndBlock().add(BigInteger.ONE);
             }
@@ -177,7 +197,7 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService {
      */
     private void executeBlockSyncTask() {
         try {
-            httpService = new EnhanceHttpServiceImpl(rpcAddr);
+            httpService = EnhanceHttpServiceImpl.createDefault(httpAddr);
             scheduler = Schedulers.from(scheduledExecutorService);
             web3Client = Web3j.build(httpService);
             // 获取当前区块高度
@@ -228,20 +248,53 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService {
     }
 
     /**
-     * 生成RPC请求信息
+     * 生成区块RPC请求信息
      *
      * @param blockNumbers
      * @return
      */
-    private List<Request> generateRequests(List<BigInteger> blockNumbers) {
-        log.info("=======generate {}-{} block request===========", blockNumbers.get(0), blockNumbers.get(blockNumbers.size() - 1));
-        return blockNumbers.stream().map(bigInteger -> new Request<>(
+    private List<Request> generateBlockRequests(List<BigInteger> blockNumbers) {
+        return blockNumbers.stream().map(blockNum -> new Request<>(
                 "eth_getBlockByNumber",
                 Arrays.asList(
-                        Numeric.encodeQuantity(bigInteger),
+                        Numeric.encodeQuantity(blockNum),
                         true),
                 this.httpService,
                 EthBlock.class)).collect(Collectors.toList());
+    }
+
+    /**
+     * 生成余额RPC请求信息
+     *
+     * @param addresses
+     * @return
+     */
+    private List<Request> generateBalanceRequests(List<String> addresses) {
+//        log.info("=======generate  balance request===========");
+        return addresses.stream().map(address -> new Request<>(
+                "eth_getBalance",
+                Arrays.asList(address, DefaultBlockParameterName.LATEST),
+                this.httpService,
+                EthGetBalance.class)).collect(Collectors.toList());
+    }
+
+    /**
+     * 生成usdt余额RPC请求信息
+     *
+     * @param addresses
+     * @return
+     */
+    private List<Request> generateUsdtBalanceRequests(List<String> addresses) {
+//        log.info("=======generate  usdt balance request===========");
+        return addresses.stream().map(address ->
+        {
+            org.web3j.protocol.core.methods.request.Transaction ethCallTransaction = org.web3j.protocol.core.methods.request.Transaction.createEthCallTransaction(address, USDT_CONTRACT_ADDRESS, USDT_BALANCE_METHOD + address.substring(2));
+            return new Request<>(
+                    "eth_call",
+                    Arrays.asList(ethCallTransaction, DefaultBlockParameterName.LATEST),
+                    this.httpService,
+                    EthGetBalance.class);
+        }).collect(Collectors.toList());
     }
 
     /**
@@ -250,8 +303,24 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService {
      * @param requests
      * @return
      */
-    private List<EthBlock> getEthBlocks(List<Request> requests) throws IOException {
+    private List<EthBlock> getBatchEthBlocks(List<Request> requests) throws IOException {
         return httpService.sendBatch(requests, EthBlock.class);
+    }
+
+    /**
+     * 批量获取以太坊账户信息
+     *
+     * @param addresses
+     * @return
+     */
+    private List<EthAccountEntity> getBatchAccountInfo(List<String> addresses) throws IOException {
+        List<EthAccountEntity> accountEntities = new ArrayList<>();
+        List<EthBalance> balances = httpService.sendBatch(generateBalanceRequests(addresses), EthBalance.class);
+        List<EthUsdtBalance> usdtBalances = httpService.sendBatch(generateUsdtBalanceRequests(addresses), EthUsdtBalance.class);
+        for (int i = 0; i < addresses.size(); i++) {
+            accountEntities.add(new EthAccountEntity(addresses.get(i), balances.get(i).getBalance(), usdtBalances.get(i).getBalance()));
+        }
+        return accountEntities;
     }
 
     /**
@@ -289,34 +358,6 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService {
      */
     private List<Transaction> batchToTransactions(List<EthBlock> blocks) {
         return blocks.stream().map(this::toTransactions).flatMap(trxs -> trxs.stream()).collect(Collectors.toList());
-    }
-
-    /**
-     * 处理批次交易信息
-     *
-     * @param trxs
-     */
-    private void handleTransactions(List<Transaction> trxs) {
-        // 清空数据库中的交易记录
-        long l = System.currentTimeMillis();
-        List<EthAccountEntity> accountEntities = new ArrayList<>();
-        trxs.forEach(trx -> {
-            if (trx.getTo() != null && !accounts.containsKey(trx.getTo())) {
-                EthAccountEntity toAccount = new EthAccountEntity(trx.getTo());
-                BigInteger ethBalance = getEthBalance(toAccount.getAddress());
-                BigInteger usdtBalance = getUsdtBalance(toAccount.getAddress());
-                toAccount.setBalance(ethBalance);
-                toAccount.setUsdtBalance(usdtBalance);
-                accounts.put(toAccount.getAddress(), toAccount);
-                accountEntities.add(toAccount);
-            }
-        });
-//        ethAccountRepository.deleteAll(accountEntities);
-//        ethAccountRepository.saveAll(accountEntities);
-//        nativeSqlRepository.batchInsertEthAccount(accountEntities);
-//        List<EthTrxEntity> trxEntities = trxs.stream().map(EthTrxEntity::fromTransaction).collect(Collectors.toList());
-//        nativeSqlRepository.batchInsertEthTrx(trxEntities);
-        log.info("save cost:" + (System.currentTimeMillis() - l));
     }
 
     /**
@@ -361,4 +402,13 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService {
         return value;
     }
 
+    /**
+     * 容器关闭时停止服务
+     *
+     * @param event
+     */
+    @Override
+    public void onApplicationEvent(ContextClosedEvent event) {
+        stop();
+    }
 }

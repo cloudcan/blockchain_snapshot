@@ -7,6 +7,7 @@ import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import top.wangjc.blockchain_snapshot.service.impl.EthSnapshotServiceImpl;
+import top.wangjc.blockchain_snapshot.service.impl.TronSnapshotServiceImpl;
 
 @SpringBootApplication
 @EnableTransactionManagement
@@ -18,6 +19,9 @@ public class BlockchainSnapshotApplication {
         //
         EthSnapshotServiceImpl ethService = context.getBean(EthSnapshotServiceImpl.class);
         ethService.start();
+        //
+        TronSnapshotServiceImpl tronService=context.getBean(TronSnapshotServiceImpl.class);
+        tronService.start();
     }
 
 }

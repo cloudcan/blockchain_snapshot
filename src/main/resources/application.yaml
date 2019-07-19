@@ -1,3 +1,4 @@
+
 spring:
   jpa:
     database: mysql
@@ -6,7 +7,15 @@ spring:
     password: root
     url: jdbc:mysql://127.0.0.1:3306/testdb?useUnicode=true&useSSL=true&verifyServerCertificate=false&characterEncoding=UTF-8
 eth:
-  rpcAddr: http://192.168.0.200:8545
+  httpAddr: http://192.168.0.200:8545
+  batchSize: 500
+  startBlock: 4000000
+  endBlock: 4500000
+tron:
+  httpAddr: https://api.trongrid.io
   batchSize: 1000
-  startBlock: 3000000
-  endBlock: 3500000
+  startBlock: 0
+  endBlock: 1000000
+logging:
+  level:
+    root: info

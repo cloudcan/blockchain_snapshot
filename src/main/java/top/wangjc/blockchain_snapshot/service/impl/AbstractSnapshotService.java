@@ -4,7 +4,7 @@ import top.wangjc.blockchain_snapshot.service.SnapshotService;
 
 public abstract class AbstractSnapshotService implements SnapshotService {
     // 服务状态
-    private ServiceStatus serviceStatus;
+    private ServiceStatus serviceStatus=ServiceStatus.Stopped;
 
     @Override
     public ServiceStatus getServiceStatus() {

@@ -15,6 +15,11 @@ public interface SnapshotService {
 
     // 服务状态
     enum ServiceStatus {
-        Running, Stopped
+        Stopped,Running
+    }
+
+    // 主链类型
+    enum ChainType {
+        Ethereum, Tron, Bitcoin
     }
 }

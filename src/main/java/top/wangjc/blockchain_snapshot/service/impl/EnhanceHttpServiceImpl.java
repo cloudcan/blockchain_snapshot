@@ -2,12 +2,10 @@ package top.wangjc.blockchain_snapshot.service.impl;
 
 import com.fasterxml.jackson.databind.type.CollectionType;
 import lombok.extern.slf4j.Slf4j;
-import okhttp3.CipherSuite;
-import okhttp3.ConnectionPool;
-import okhttp3.ConnectionSpec;
-import okhttp3.OkHttpClient;
+import okhttp3.*;
 import okhttp3.logging.HttpLoggingInterceptor;
 import org.web3j.protocol.core.Request;
+import org.web3j.protocol.exceptions.ClientConnectionException;
 import org.web3j.protocol.http.HttpService;
 
 import java.io.IOException;
@@ -23,7 +21,7 @@ import static okhttp3.ConnectionSpec.CLEARTEXT;
  */
 @Slf4j
 public class EnhanceHttpServiceImpl extends HttpService {
-    private static final CipherSuite[] INFURA_CIPHER_SUITES = new CipherSuite[] {
+    private static final CipherSuite[] INFURA_CIPHER_SUITES = new CipherSuite[]{
             CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
             CipherSuite.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
             CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
@@ -59,8 +57,20 @@ public class EnhanceHttpServiceImpl extends HttpService {
      */
     private static final List<ConnectionSpec> CONNECTION_SPEC_LIST = Arrays.asList(
             INFURA_CIPHER_SUITE_SPEC, CLEARTEXT);
-    public EnhanceHttpServiceImpl(String url) {
-        super(url,createOkHttpClient());
+    private final OkHttpClient httpClient;
+
+    public EnhanceHttpServiceImpl(String url, OkHttpClient client) {
+        super(url, client);
+        this.httpClient = client;
+    }
+
+    /**
+     * 创建默认的实例
+     *
+     * @return
+     */
+    public static EnhanceHttpServiceImpl createDefault(String url) {
+        return new EnhanceHttpServiceImpl(url, createOkHttpClient());
     }
 
     /**
@@ -86,7 +96,28 @@ public class EnhanceHttpServiceImpl extends HttpService {
         }
     }
 
-    private static OkHttpClient createOkHttpClient() {
+    /**
+     * 发送自定义请求
+     */
+    public <T> T sendCustomRequest(okhttp3.Request request, Class<T> responseType) throws IOException {
+
+        Response response = httpClient.newCall(request).execute();
+        ResponseBody responseBody = response.body();
+        if (response.isSuccessful()) {
+            InputStream result = responseBody.byteStream();
+            if (result != null) {
+                return objectMapper.readValue(result, responseType);
+            } else {
+                return null;
+            }
+        } else {
+            int code = response.code();
+            String text = responseBody == null ? "N/A" : responseBody.string();
+            throw new ClientConnectionException("Invalid response received: " + code + "; " + text);
+        }
+    }
+
+    public static OkHttpClient createOkHttpClient() {
         final OkHttpClient.Builder builder = new OkHttpClient.Builder()
                 .connectionSpecs(CONNECTION_SPEC_LIST)
                 .connectionPool(new ConnectionPool())

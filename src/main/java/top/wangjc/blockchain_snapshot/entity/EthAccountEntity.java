@@ -11,18 +11,18 @@ import java.math.BigInteger;
 @Entity(name = "eth_account")
 public class EthAccountEntity {
     /**
-     * usdt 余额
-     */
-    private BigInteger usdtBalance;
-    /**
      * 地址
      */
     @Id
     private String address;
     /**
+     * usdt 余额
+     */
+    private BigInteger usdtBalance;
+    /**
      * 余额
      */
-    private BigInteger balance;
+    private BigInteger ethBalance;
 
     public EthAccountEntity() {
         this(Strings.EMPTY);
@@ -36,9 +36,9 @@ public class EthAccountEntity {
         this(address, balance, BigInteger.ZERO);
     }
 
-    public EthAccountEntity(String address, BigInteger balance, BigInteger usdtBalance) {
+    public EthAccountEntity(String address, BigInteger ethBalance, BigInteger usdtBalance) {
         this.address = address;
-        this.balance = balance;
+        this.ethBalance = ethBalance;
         this.usdtBalance = usdtBalance;
     }
 }
