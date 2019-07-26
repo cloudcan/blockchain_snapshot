@@ -1,25 +1,24 @@
-package top.wangjc.blockchain_snapshot.entity;
+package top.wangjc.blockchain_snapshot.document;
 
 import lombok.Data;
 import org.apache.logging.log4j.util.Strings;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
 
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
 import javax.persistence.Id;
 import java.math.BigInteger;
 import java.util.Date;
 
 @Data
-@Entity(name = "eth_account")
-public class EthAccountEntity {
+@Document("eth_account")
+public class EthAccountDocument {
     private static final BigInteger ETH_LOW = BigInteger.valueOf(1000000000000000000l);
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Integer id;
+    private String id;
     /**
      * 地址
      */
+    @Indexed
     private String address;
     /**
      * usdt 余额
@@ -52,26 +51,21 @@ public class EthAccountEntity {
         this.ethBalanceLow = ethBalance.subtract(ethBalanceHigh.multiply(ETH_LOW));
     }
 
-    public EthAccountEntity() {
+    public EthAccountDocument() {
         this(Strings.EMPTY);
     }
 
-    public EthAccountEntity(String address) {
+    public EthAccountDocument(String address) {
         this(address, BigInteger.ZERO);
     }
 
-    public EthAccountEntity(String address, BigInteger balance) {
+    public EthAccountDocument(String address, BigInteger balance) {
         this(address, balance, BigInteger.ZERO);
     }
 
-    public EthAccountEntity(String address, BigInteger ethBalance, BigInteger usdtBalance) {
-        this(address, ethBalance, usdtBalance, 0);
-    }
-
-    public EthAccountEntity(String address, BigInteger ethBalance, BigInteger usdtBalance, int updateBlockHeight) {
+    public EthAccountDocument(String address, BigInteger ethBalance, BigInteger usdtBalance) {
         this.address = address;
         this.usdtBalance = usdtBalance;
         setEthBalance(ethBalance);
-        this.updateBlockHeight = updateBlockHeight;
     }
 }

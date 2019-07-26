@@ -122,6 +122,7 @@ public class EnhanceHttpServiceImpl extends HttpService {
                 .connectionSpecs(CONNECTION_SPEC_LIST)
                 .connectionPool(new ConnectionPool())
                 .connectTimeout(120, TimeUnit.SECONDS)
+                .writeTimeout(120,TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS);
         configureLogging(builder);
         return builder.build();

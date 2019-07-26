@@ -2,24 +2,27 @@ package top.wangjc.blockchain_snapshot.entity;
 
 import lombok.Data;
 import org.springframework.data.annotation.CreatedDate;
-import top.wangjc.blockchain_snapshot.service.SnapshotService;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+import top.wangjc.blockchain_snapshot.service.BlockChainService;
 
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import java.math.BigInteger;
+import javax.persistence.*;
 import java.util.Date;
 
 @Data
 @Entity(name = "operation_log")
+@EntityListeners(AuditingEntityListener.class)
 public class OperationLogEntity {
     @Id
-    private int id;
-    private BigInteger startBlock;
-    private BigInteger endBlock;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+    private Integer startBlock;
+    private Integer endBlock;
+    @CreatedDate
+    @Column(updatable = false, nullable = false)
     private Date createDate;
-    private SnapshotService.ChainType chainType;
+    private BlockChainService.ChainType chainType;
 
-    public OperationLogEntity(BigInteger startBlock, BigInteger endBlock, SnapshotService.ChainType chainType) {
+    public OperationLogEntity(int startBlock, int endBlock, BlockChainService.ChainType chainType) {
         this.startBlock = startBlock;
         this.endBlock = endBlock;
         this.chainType = chainType;

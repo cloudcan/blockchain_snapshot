@@ -1,6 +1,6 @@
 package top.wangjc.blockchain_snapshot.service;
 
-public interface SnapshotService {
+public interface BlockChainService {
     // 启动服务
     void start();
 
@@ -13,6 +13,7 @@ public interface SnapshotService {
     // 获取服务状态
     ServiceStatus getServiceStatus();
 
+
     // 服务状态
     enum ServiceStatus {
         Stopped,Running
@@ -20,6 +21,6 @@ public interface SnapshotService {
 
     // 主链类型
     enum ChainType {
-        Ethereum, Tron, Bitcoin
+        Ethereum, Tron, BitCoin,LiteCoin
     }
 }
