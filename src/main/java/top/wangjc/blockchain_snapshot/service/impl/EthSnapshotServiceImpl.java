@@ -14,12 +14,12 @@ import org.web3j.protocol.core.methods.response.EthBlock;
 import org.web3j.protocol.core.methods.response.EthGetBalance;
 import org.web3j.protocol.core.methods.response.Transaction;
 import org.web3j.utils.Numeric;
+import top.wangjc.blockchain_snapshot.document.EthAccountDocument;
+import top.wangjc.blockchain_snapshot.document.OperationLogDocument;
 import top.wangjc.blockchain_snapshot.dto.EthBalance;
 import top.wangjc.blockchain_snapshot.dto.EthUsdtBalance;
-import top.wangjc.blockchain_snapshot.entity.EthAccountEntity;
-import top.wangjc.blockchain_snapshot.entity.OperationLogEntity;
 import top.wangjc.blockchain_snapshot.repository.MongoRepositoryImpl;
-import top.wangjc.blockchain_snapshot.utils.Counter;
+import top.wangjc.blockchain_snapshot.repository.OperationLogRepository;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -46,8 +46,6 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
 
     private EnhanceHttpServiceImpl httpService;
     private Web3j web3Client;
-    private Counter blockCounter;
-
     @Autowired
     private MongoRepositoryImpl mongoRepository;
 
@@ -55,17 +53,20 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
     private final static String USDT_CONTRACT_ADDRESS = "0xdac17f958d2ee523a2206206994597c13d831ec7";
     // usdt 余额方法
     private final static String USDT_BALANCE_METHOD = "0x27e235e3000000000000000000000000";
+    @Autowired
+    private OperationLogRepository opreationLogRepository;
 
     protected EthSnapshotServiceImpl() {
-        super(ChainType.Ethereum);
+        super(ChainType.Ethereum, "ethereum_snapshot");
     }
 
     /**
      * 记录日志
      *
-     * @param operationLogEntity
+     * @param operationLog
      */
-    protected void handleLog(OperationLogEntity operationLogEntity) {
+    protected void handleLog(OperationLogDocument operationLog) {
+        opreationLogRepository.save(operationLog);
     }
 
     /**
@@ -75,10 +76,10 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
      * @return
      */
     @Override
-    protected OperationLogEntity handleBatchBlock(List<Integer> batch) {
-        log.info("=======start handle {}-{} block ===========", batch.get(0), batch.get(batch.size() - 1));
+    protected OperationLogDocument handleBatchBlock(List<Integer> batch) {
+        log.debug("=======start handle {}-{} block ===========", batch.get(0), batch.get(batch.size() - 1));
         long start = System.currentTimeMillis();
-        OperationLogEntity operationLogEntity = new OperationLogEntity(batch.get(0), batch.get(batch.size() - 1), chainType);
+        OperationLogDocument operationLogEntity = new OperationLogDocument(batch.get(0), batch.get(batch.size() - 1), chainType);
         try {
             // 账号信息
             Flowable.just(batch)
@@ -89,17 +90,25 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
                     .subscribe(transactions -> {
                         List<String> addresses = new ArrayList<>();
                         transactions.forEach(transaction -> {
-                            String address = transaction.getTo();
-                            if (address != null && !foundAddress.contains(address)) {
-                                foundAddress.add(address);
-                                addresses.add(address);
+                            String toAddress = transaction.getTo();
+                            String fromAddress = transaction.getFrom();
+                            if (toAddress != null && !foundAddress.contains(toAddress)) {
+                                foundAddress.add(toAddress);
+                                addresses.add(toAddress);
+                            }
+                            if (fromAddress != null && !foundAddress.contains(fromAddress)) {
+                                foundAddress.add(fromAddress);
+                                addresses.add(fromAddress);
                             }
                         });
                         // 批量获取账号信息并保存
-                        Flowable.fromIterable(addresses).buffer(1000).map(this::getBatchAccountInfo).subscribe(accounts -> mongoRepository.batchSave(accounts), this::handleError);
+                        Flowable.fromIterable(addresses)
+                                .buffer(1000)
+                                .map(this::getBatchAccountInfo)
+                                .subscribe(accounts -> mongoRepository.batchSave(accounts), this::handleError);
                     }, this::handleError, () -> {
-                        blockCounter.increse(batch.size());
-                        log.info("======handle {}-{} batch block complete,cost:{} ms=======", batch.get(0), batch.get(batch.size() - 1), (System.currentTimeMillis() - start));
+                        increaseCounter(batch.size());
+                        log.debug("======handle {}-{} batch block complete,cost:{} ms=======", batch.get(0), batch.get(batch.size() - 1), (System.currentTimeMillis() - start));
                     });
         } catch (Exception e) {
             log.error("批量处理区块失败:", e);
@@ -112,7 +121,7 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
      *
      * @return
      */
-    protected int getStartBlock() {
+    public int getStartBlock() {
         return startBlock;
     }
 
@@ -121,12 +130,12 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
      *
      * @return
      */
-    protected int getEndBlock() {
+    public int getEndBlock() {
         return endBlock;
     }
 
     @Override
-    protected int getBatchSize() {
+    public int getBatchSize() {
         return batchSize;
     }
 
@@ -153,7 +162,6 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
      * @return
      */
     private List<Request> generateBalanceRequests(List<String> addresses) {
-//        log.info("=======generate  balance request===========");
         return addresses.stream().map(address -> new Request<>(
                 METHOD_ETH_GET_BALANCE,
                 Arrays.asList(address, DefaultBlockParameterName.LATEST),
@@ -168,7 +176,6 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
      * @return
      */
     private List<Request> generateUsdtBalanceRequests(List<String> addresses) {
-//        log.info("=======generate  usdt balance request===========");
         return addresses.stream().map(address ->
         {
             org.web3j.protocol.core.methods.request.Transaction ethCallTransaction = org.web3j.protocol.core.methods.request.Transaction.createEthCallTransaction(address, USDT_CONTRACT_ADDRESS, USDT_BALANCE_METHOD + address.substring(2));
@@ -196,12 +203,12 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
      * @param addresses
      * @return
      */
-    private List<EthAccountEntity> getBatchAccountInfo(List<String> addresses) throws IOException {
-        List<EthAccountEntity> accountEntities = new ArrayList<>();
+    private List<EthAccountDocument> getBatchAccountInfo(List<String> addresses) throws IOException {
+        List<EthAccountDocument> accountEntities = new ArrayList<>();
         List<EthBalance> balances = httpService.sendBatch(generateBalanceRequests(addresses), EthBalance.class);
         List<EthUsdtBalance> usdtBalances = httpService.sendBatch(generateUsdtBalanceRequests(addresses), EthUsdtBalance.class);
         for (int i = 0; i < addresses.size(); i++) {
-            accountEntities.add(new EthAccountEntity(addresses.get(i), balances.get(i).getBalance(), usdtBalances.get(i).getBalance(), endBlock));
+            accountEntities.add(new EthAccountDocument(addresses.get(i), balances.get(i).getBalance(), usdtBalances.get(i).getBalance(), endBlock));
         }
         return accountEntities;
     }
@@ -238,7 +245,6 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
         super.doInit();
         httpService = EnhanceHttpServiceImpl.createDefault(httpAddr);
         web3Client = Web3j.build(httpService);
-        blockCounter = new Counter("处理以太坊区块");
     }
 
     @Override
@@ -256,4 +262,5 @@ public class EthSnapshotServiceImpl extends AbstractSnapshotService implements A
     public void onApplicationEvent(ContextClosedEvent event) {
         stop();
     }
+
 }

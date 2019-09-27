@@ -13,14 +13,16 @@ public interface BlockChainService {
     // 获取服务状态
     ServiceStatus getServiceStatus();
 
+    String getServiceName();
+
 
     // 服务状态
     enum ServiceStatus {
-        Stopped,Running
+        Stopped, Running
     }
 
     // 主链类型
     enum ChainType {
-        Ethereum, Tron, BitCoin,LiteCoin
+        Ethereum, Tron, Bitcoin, Litecoin,Hcash
     }
 }

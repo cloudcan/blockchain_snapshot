@@ -8,12 +8,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.stereotype.Service;
+import top.wangjc.blockchain_snapshot.document.OperationLogDocument;
+import top.wangjc.blockchain_snapshot.document.TronAccountDocument;
 import top.wangjc.blockchain_snapshot.dto.TronAccount;
 import top.wangjc.blockchain_snapshot.dto.TronBlock;
-import top.wangjc.blockchain_snapshot.entity.OperationLogEntity;
-import top.wangjc.blockchain_snapshot.entity.TronAccountEntity;
-import top.wangjc.blockchain_snapshot.repository.OperationLogRepository;
-import top.wangjc.blockchain_snapshot.repository.TronAccountRepository;
+import top.wangjc.blockchain_snapshot.repository.MongoRepositoryImpl;
 
 import java.io.IOException;
 import java.util.List;
@@ -33,20 +32,18 @@ public class TronSnapshotServiceImpl extends AbstractSnapshotService implements 
 
     private static final String INVALID_ADDRESS = "3078303030303030303030303030303030303030303030";
 
-    @Autowired
-    private OperationLogRepository operationLogRepository;
-    @Autowired
-    private TronAccountRepository tronAccountRepository;
-
     private EnhanceHttpServiceImpl httpService;
+    @Autowired
+    private MongoRepositoryImpl mongoRepository;
+
 
     protected TronSnapshotServiceImpl() {
-        super(ChainType.Tron);
+        super(ChainType.Tron, "tron_snapshot");
     }
 
     @Override
-    protected void handleLog(OperationLogEntity operationLogEntity) {
-        
+    protected void handleLog(OperationLogDocument operationLogEntity) {
+
     }
 
     /**
@@ -56,24 +53,31 @@ public class TronSnapshotServiceImpl extends AbstractSnapshotService implements 
      * @return
      */
     @Override
-    protected OperationLogEntity handleBatchBlock(List<Integer> batch) {
-        log.info("=======start handle {}-{} block ===========", batch.get(0), batch.get(batch.size() - 1));
+    protected OperationLogDocument handleBatchBlock(List<Integer> batch) {
+//        log.info("=======start handle {}-{} block ===========", batch.get(0), batch.get(batch.size() - 1));
         long s = System.currentTimeMillis();
-        OperationLogEntity operationLogEntity = new OperationLogEntity(batch.get(0), batch.get(batch.size() - 1), chainType);
+        OperationLogDocument operationLogEntity = new OperationLogDocument(batch.get(0), batch.get(batch.size() - 1), chainType);
         Flowable.fromIterable(batch)
-                .map(this::getBlockByNum)
                 .retry(3)
-                .map(block -> block.getTransactions())
-                .flatMapIterable(transactions -> transactions)
-                .map(this::getOwnerAddresses)
-                .map(this::getAccount)
-                .map(TronAccountEntity::fromTronAccount)
-                .toList()
-                .subscribe(tronAccountEntities -> {
-                    tronAccountRepository.saveAll(tronAccountEntities);
-                    log.info("======handle {}-{} batch block complete，get {} accounts ,cost {} s=======", batch.get(0), batch.get(batch.size() - 1), tronAccountEntities.size(), (System.currentTimeMillis() - s) / 1000);
-                }, this::handleError);
+                .map(this::getBlockByNum)
+                .subscribe(this::handleBlock, this::handleError, () -> {
+                });
         return operationLogEntity;
+    }
+
+    private void handleBlock(TronBlock tronBlock) {
+        Flowable.fromIterable(tronBlock.getTransactions())
+                .map(this::getOwnerAddresses)
+                .filter(address -> !foundAddress.contains(address))
+                .retry(3)
+                .map(this::getAccount)
+                .map(TronAccountDocument::fromTronAccount)
+                .toList()
+                .subscribe(accounts -> {
+                    mongoRepository.batchSave(accounts);
+                    foundAddress.addAll(accounts.stream().map(account -> account.getAddress()).collect(Collectors.toList()));
+                    increaseCounter();
+                }, this::handleError);
     }
 
     /**
@@ -92,17 +96,17 @@ public class TronSnapshotServiceImpl extends AbstractSnapshotService implements 
      * @return
      */
     @Override
-    protected int getStartBlock() {
+    public int getStartBlock() {
         return startBlock;
     }
 
     @Override
-    protected int getEndBlock() {
+    public int getEndBlock() {
         return endBlock;
     }
 
     @Override
-    protected int getBatchSize() {
+    public int getBatchSize() {
         return batchSize;
     }
 

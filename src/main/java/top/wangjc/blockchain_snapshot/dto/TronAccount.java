@@ -4,6 +4,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -11,13 +13,13 @@ import java.util.List;
 @NoArgsConstructor
 public class TronAccount implements Serializable {
     private String address;
-    private long balance;
-    private List<KeyValue> asset=new ArrayList<>();
+    private BigDecimal balance;
+    private List<KeyValue> asset = new ArrayList<>();
 
     @Data
     public static class KeyValue {
         private String key;
-        private long value;
+        private BigDecimal value;
 
     }
 

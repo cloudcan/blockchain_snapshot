@@ -5,21 +5,23 @@ import lombok.extern.slf4j.Slf4j;
 import okhttp3.ConnectionPool;
 import okhttp3.Credentials;
 import okhttp3.OkHttpClient;
+import org.apache.logging.log4j.util.Strings;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.web3j.protocol.core.Request;
 import org.web3j.protocol.core.methods.response.EthBlock;
 import top.wangjc.blockchain_snapshot.document.BtcUTXODocument;
+import top.wangjc.blockchain_snapshot.document.LtcUTXODocument;
 import top.wangjc.blockchain_snapshot.dto.BtcBlock;
 import top.wangjc.blockchain_snapshot.dto.BtcBlockHash;
-import top.wangjc.blockchain_snapshot.repository.BtcUTXODocRepository;
-import top.wangjc.blockchain_snapshot.repository.BtcUTXORepository;
 import top.wangjc.blockchain_snapshot.repository.MongoRepositoryImpl;
 import top.wangjc.blockchain_snapshot.service.BlockChainService;
 import top.wangjc.blockchain_snapshot.utils.Counter;
+import top.wangjc.blockchain_snapshot.utils.TimePrint;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -44,10 +46,6 @@ public class BtcReplayServiceImpl implements BlockChainService {
     @Value("${btc.endBlock:}")
     private Integer endBlock;
     private EnhanceHttpServiceImpl httpService;
-    @Autowired
-    private BtcUTXORepository btcUTXORepository;
-    @Autowired
-    private BtcUTXODocRepository btcUTXODocRepository;
 
     @Autowired
     private MongoRepositoryImpl mongoRepository;
@@ -73,7 +71,16 @@ public class BtcReplayServiceImpl implements BlockChainService {
                 .map(this::generateBlockHashRequest)
                 .map(this::getBlockHash)
                 .map(this::generateBlockRequest)
-                .map(this::getBlock).subscribe(this::handleBlock);
+                .map(this::getBlock).subscribe(this::handleBlock, this::handleError, () -> log.info("-------task complete!---------------"));
+    }
+
+    /**
+     * 处理错误
+     *
+     * @param e
+     */
+    protected void handleError(Throwable e) {
+        log.info("replay block error:", e);
     }
 
     /**
@@ -83,23 +90,36 @@ public class BtcReplayServiceImpl implements BlockChainService {
      */
     private void handleBlock(BtcBlock block) {
         BtcBlock.Block btcBlock = block.getBlock();
-        List<BtcUTXODocument> documents = new ArrayList<>();
+        List<BtcUTXODocument> utxoDocuments = new ArrayList<>();
         List<String> outPoints = new ArrayList<>();
         btcBlock.getTransactions().forEach(transaction -> {
             if (!transaction.isCoinbase()) {
                 transaction.getInputs().forEach(input -> {
-
+                    String outPoint = BtcUTXODocument.generateOutPoint(input.getTxid(), input.getIndex());
+                    outPoints.add(outPoint);
                 });
             }
             transaction.getOutputs().forEach(output -> {
+                BtcUTXODocument document = new BtcUTXODocument();
+                document.setTxId(transaction.getTxid());
+                List<String> addresses = output.getScriptPubKey().getAddresses();
+                String addressStr = addresses.size() > 0 ? addresses.get(0) : "";
+                document.setAddress(addressStr);
+                document.setSpentBlock(Strings.EMPTY);
+                document.setCoinBase(transaction.isCoinbase());
+                document.setMintValue(output.getValue());
+                document.setMintIndex(output.getIndex());
+                document.setOutPoint(BtcUTXODocument.generateOutPoint(document.getTxId(), document.getMintIndex()));
+                utxoDocuments.add(document);
             });
         });
+        TimePrint timePrint=new TimePrint();
         // 生成utxo
-        btcUTXODocRepository.saveAll(documents);
+        mongoRepository.batchSave(utxoDocuments);
+        timePrint.markPoint("save:");
         // utxo 被消费
-        long l = System.currentTimeMillis();
-        mongoRepository.deleteBtcUTXOByOutpoint(outPoints);
-        log.info("cost:{}", System.currentTimeMillis() - l);
+//        mongoRepository.updateBtcUTXOByOutpoint(outPoints, block.getBlock().getHash());
+        timePrint.markPoint("update:");
         blockCounter.increse();
     }
 
@@ -163,6 +183,11 @@ public class BtcReplayServiceImpl implements BlockChainService {
 
     @Override
     public ServiceStatus getServiceStatus() {
+        return null;
+    }
+
+    @Override
+    public String getServiceName() {
         return null;
     }
 }

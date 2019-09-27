@@ -1,16 +1,19 @@
 package top.wangjc.blockchain_snapshot.service.impl;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.reactivex.Flowable;
 import io.reactivex.Scheduler;
 import io.reactivex.schedulers.Schedulers;
 import lombok.extern.slf4j.Slf4j;
-import org.web3j.utils.Async;
-import top.wangjc.blockchain_snapshot.entity.OperationLogEntity;
+import top.wangjc.blockchain_snapshot.document.OperationLogDocument;
 import top.wangjc.blockchain_snapshot.service.BlockChainService;
+import top.wangjc.blockchain_snapshot.utils.Counter;
 
+import java.util.Date;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -18,23 +21,43 @@ import java.util.concurrent.TimeUnit;
 public abstract class AbstractSnapshotService implements BlockChainService {
     // 服务状态
     private ServiceStatus serviceStatus = ServiceStatus.Stopped;
+
+    public Date getStartTime() {
+        return startTime;
+    }
+
     // 任务开始时间
-    private long taskStartMill;
+    private Date startTime;
     // 调度器
     private Scheduler scheduler;
     private ScheduledExecutorService scheduledExecutorService;
     // 主链类型
     public final ChainType chainType;
+    private final String serviceName;
+
+    public Counter getBlockCounter() {
+        return blockCounter;
+    }
+
+    private Counter blockCounter;
+
     // 找到的账户地址
+    @JsonIgnore
     public Set<String> foundAddress = new ConcurrentSkipListSet<>();
 
-    protected AbstractSnapshotService(ChainType chainType) {
+    protected AbstractSnapshotService(ChainType chainType, String serviceName) {
         this.chainType = chainType;
+        this.serviceName = serviceName;
     }
 
     @Override
     public ServiceStatus getServiceStatus() {
         return serviceStatus;
+    }
+
+    @Override
+    public String getServiceName() {
+        return serviceName;
     }
 
     protected void setServiceStatus(ServiceStatus status) {
@@ -51,7 +74,8 @@ public abstract class AbstractSnapshotService implements BlockChainService {
     public void start() {
         if (getServiceStatus() != ServiceStatus.Running) {
             setServiceStatus(ServiceStatus.Running);
-            taskStartMill = System.currentTimeMillis();
+            startTime = new Date();
+            this.blockCounter = new Counter(chainType.name());
             executeBlockSyncTask();
         } else {
             log.info(" {} service is running!", chainType);
@@ -82,7 +106,7 @@ public abstract class AbstractSnapshotService implements BlockChainService {
             assert endBlock > startBlock;
             log.info("============ replay block {}-{} =================== ", startBlock, endBlock);
             // 分批次遍历区块
-            Flowable.range(startBlock, endBlock - startBlock+1)
+            Flowable.range(startBlock, endBlock - startBlock + 1)
                     .buffer(batchSize)
                     .parallel()
                     .runOn(scheduler)
@@ -98,7 +122,7 @@ public abstract class AbstractSnapshotService implements BlockChainService {
      * 处理任务完成
      */
     protected void handleLogComplete() {
-        log.info("================= replay block complete ,total cost:{} s,get {} address!===============", (System.currentTimeMillis() - taskStartMill) / 1000, foundAddress.size());
+        log.info("================= replay block complete ,total cost:{} s,get {} address!===============", (System.currentTimeMillis() - startTime.getTime()) / 1000, foundAddress.size());
         stop();
     }
 
@@ -114,9 +138,9 @@ public abstract class AbstractSnapshotService implements BlockChainService {
     /**
      * 处理日志
      *
-     * @param operationLogEntity
+     * @param operationLog
      */
-    protected abstract void handleLog(OperationLogEntity operationLogEntity);
+    protected abstract void handleLog(OperationLogDocument operationLog);
 
     /**
      * 处理批量区块请求
@@ -124,7 +148,7 @@ public abstract class AbstractSnapshotService implements BlockChainService {
      * @param batchNums
      * @return
      */
-    protected abstract OperationLogEntity handleBatchBlock(List<Integer> batchNums);
+    protected abstract OperationLogDocument handleBatchBlock(List<Integer> batchNums);
 
     /**
      * 获取开始区块
@@ -151,7 +175,7 @@ public abstract class AbstractSnapshotService implements BlockChainService {
      * 初始化
      */
     protected void doInit() {
-        scheduledExecutorService = Async.defaultExecutorService();
+        scheduledExecutorService = Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors());
         scheduler = Schedulers.from(scheduledExecutorService);
     }
 
@@ -159,11 +183,26 @@ public abstract class AbstractSnapshotService implements BlockChainService {
      * 关闭
      */
     protected void doClose() {
-        scheduler.shutdown();
+        scheduledExecutorService.shutdown();
         try {
-            scheduledExecutorService.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
+            if (!scheduledExecutorService.awaitTermination(60, TimeUnit.SECONDS)) {
+                scheduledExecutorService.shutdownNow();
+                if (!scheduledExecutorService.awaitTermination(60, TimeUnit.SECONDS)) {
+                    System.err.println("Thread pool did not terminate");
+                }
+            }
+        } catch (InterruptedException ie) {
+            scheduledExecutorService.shutdownNow();
+            Thread.currentThread().interrupt();
         }
+    }
+
+    protected void increaseCounter() {
+        blockCounter.increse();
+    }
+
+    protected void increaseCounter(int num) {
+        blockCounter.increse(num);
     }
 
     @Override
@@ -171,10 +210,12 @@ public abstract class AbstractSnapshotService implements BlockChainService {
         if (getServiceStatus() != ServiceStatus.Stopped) {
             doClose();
             setServiceStatus(ServiceStatus.Stopped);
+            blockCounter.reset();
             log.info("{} service will be stopped!", chainType);
         } else {
             log.info("{} service has been stopped!", chainType);
         }
     }
+
 
 }

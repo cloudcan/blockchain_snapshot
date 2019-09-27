@@ -10,15 +10,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.web3j.protocol.core.Request;
-import org.web3j.protocol.core.methods.response.EthBlock;
-import top.wangjc.blockchain_snapshot.document.LtcUTXODocument;
+import top.wangjc.blockchain_snapshot.document.HcashUTXODocument;
 import top.wangjc.blockchain_snapshot.document.OperationLogDocument;
-import top.wangjc.blockchain_snapshot.dto.LtcBlock;
-import top.wangjc.blockchain_snapshot.dto.LtcBlockHash;
+import top.wangjc.blockchain_snapshot.dto.HcashBlock;
+import top.wangjc.blockchain_snapshot.dto.HcashBlockHash;
 import top.wangjc.blockchain_snapshot.repository.MongoRepositoryImpl;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -27,28 +25,29 @@ import java.util.stream.Collectors;
 
 @Service
 @Slf4j
-public class LtcSnapshotServiceImpl extends AbstractSnapshotService {
+public class HcashSnapshotServiceImpl extends AbstractSnapshotService {
     public static final String METHOD_GET_BLOCK_HASH = "getblockhash";
     public static final String METHOD_GET_BLOCK = "getblock";
-    @Value("${ltc.username:}")
+    @Value("${hcash.username:}")
     private String username;
-    @Value("${ltc.password:}")
+    @Value("${hcash.password:}")
     private String password;
-    @Value("${ltc.httpAddr}")
+    @Value("${hcash.httpAddr}")
     private String httpAddr;
-    @Value("${ltc.batchSize:100}")
+    @Value("${hcash.batchSize:100}")
     private Integer batchSize;
-    @Value("${ltc.startBlock:}")
+    @Value("${hcash.startBlock:}")
     private Integer startBlock;
-    @Value("${ltc.endBlock:}")
+    @Value("${hcash.endBlock:}")
     private Integer endBlock;
     private EnhanceHttpServiceImpl httpService;
 
     @Autowired
     private MongoRepositoryImpl mongoRepository;
 
-    protected LtcSnapshotServiceImpl() {
-        super(ChainType.Litecoin, "litecoin_snapshot");
+
+    protected HcashSnapshotServiceImpl() {
+        super(ChainType.Hcash, "hcash_snapshot");
     }
 
     @Override
@@ -76,13 +75,12 @@ public class LtcSnapshotServiceImpl extends AbstractSnapshotService {
 //        long start = System.currentTimeMillis();
         OperationLogDocument logEntity = new OperationLogDocument(batch.get(0), batch.get(batch.size() - 1), chainType);
         // 账号信息
-        List<LtcUTXODocument> documents = new ArrayList<>();
         Flowable.just(batch)
                 .map(this::generateBlockHashRequests)
                 .map(this::getBatchBlockHashes)
                 .map(this::generateBlockRequests)
                 .map(this::getBatchBlocks)
-                .flatMapIterable(ltcBlocks -> ltcBlocks)
+                .flatMapIterable(hcashBlocks -> hcashBlocks)
                 .subscribe(this::handleBlock, this::handleError, () -> {
 //                    blockCounter.increse(batch.size());
 //                    log.info("======handle {}-{} batch block complete,cost:{} ms=======", batch.get(0), batch.get(batch.size() - 1), (System.currentTimeMillis() - start));
@@ -95,21 +93,21 @@ public class LtcSnapshotServiceImpl extends AbstractSnapshotService {
      *
      * @param block
      */
-    private void handleBlock(LtcBlock block) {
-        LtcBlock.Block ltcBlock = block.getBlock();
-        List<LtcUTXODocument> utxoDocuments = new ArrayList<>();
+    private void handleBlock(HcashBlock block) {
+        HcashBlock.Block hcashBlock = block.getBlock();
+        List<HcashUTXODocument> utxoDocuments = new ArrayList<>();
         List<String> outPoints = new ArrayList<>();
-        ltcBlock.getTransactions().forEach(transaction -> {
+        hcashBlock.getTransactions().forEach(transaction -> {
 //            if (!transaction.isCoinbase()) {
 //                transaction.getInputs().forEach(input -> {
-//                    String outPoint = LtcUTXODocument.generateOutPoint(input.getTxid(), input.getIndex());
+//                    String outPoint = HcashUTXODocument.generateOutPoint(input.getTxid(), input.getIndex());
 //                    outPoints.add(outPoint);
 //                });
 //            }
             transaction.getOutputs().forEach(output -> {
-                LtcUTXODocument document = new LtcUTXODocument();
-//                document.setBlockHash(ltcBlock.getHash());
-//                document.setBlockHeight(ltcBlock.getHeight());
+                HcashUTXODocument document = new HcashUTXODocument();
+//                document.setBlockHash(hcashBlock.getHash());
+//                document.setBlockHeight(hcashBlock.getHeight());
                 document.setTxId(transaction.getTxid());
                 List<String> addresses = output.getScriptPubKey().getAddresses();
                 String addressStr = addresses.size() > 0 ? addresses.get(0) : "";
@@ -118,16 +116,16 @@ public class LtcSnapshotServiceImpl extends AbstractSnapshotService {
                 document.setCoinBase(transaction.isCoinbase());
                 document.setMintValue(output.getValue());
                 document.setMintIndex(output.getIndex());
-                document.setOutPoint(LtcUTXODocument.generateOutPoint(document.getTxId(), document.getMintIndex()));
+                document.setOutPoint(HcashUTXODocument.generateOutPoint(document.getTxId(), document.getMintIndex()));
                 utxoDocuments.add(document);
             });
         });
-        // 生成utxo
 //        TimePrint timePrint=new TimePrint();
+        // 生成utxo
         Flowable.fromIterable(utxoDocuments).buffer(1000).subscribe(utxos -> mongoRepository.batchSave(utxos), this::handleError);
-//        timePrint.markPoint("1");
+//        timePrint.markPoint("save:");
         // utxo 被消费
-//        mongoRepository.updateUTXOByOutpoint(outPoints, block.getBlock().getHash(),LtcUTXODocument.class);
+//        mongoRepository.updateUTXOByOutpoint(outPoints, block.getBlock().getHash(),HcashUTXODocument.class);
         increaseCounter();
     }
 
@@ -142,7 +140,7 @@ public class LtcSnapshotServiceImpl extends AbstractSnapshotService {
                 METHOD_GET_BLOCK_HASH,
                 Arrays.asList(blockNum),
                 this.httpService,
-                EthBlock.class)).collect(Collectors.toList());
+                HcashBlockHash.class)).collect(Collectors.toList());
     }
 
     /**
@@ -151,8 +149,8 @@ public class LtcSnapshotServiceImpl extends AbstractSnapshotService {
      * @param requests
      * @return
      */
-    private List<LtcBlockHash> getBatchBlockHashes(List<Request> requests) throws IOException {
-        return httpService.sendBatch(requests, LtcBlockHash.class);
+    private List<HcashBlockHash> getBatchBlockHashes(List<Request> requests) throws IOException {
+        return httpService.sendBatch(requests, HcashBlockHash.class);
     }
 
     /**
@@ -161,8 +159,8 @@ public class LtcSnapshotServiceImpl extends AbstractSnapshotService {
      * @param requests
      * @return
      */
-    private List<LtcBlock> getBatchBlocks(List<Request> requests) throws IOException {
-        return httpService.sendBatch(requests, LtcBlock.class);
+    private List<HcashBlock> getBatchBlocks(List<Request> requests) throws IOException {
+        return httpService.sendBatch(requests, HcashBlock.class);
     }
 
     /**
@@ -171,12 +169,12 @@ public class LtcSnapshotServiceImpl extends AbstractSnapshotService {
      * @param blockHashes
      * @return
      */
-    private List<Request> generateBlockRequests(List<LtcBlockHash> blockHashes) {
+    private List<Request> generateBlockRequests(List<HcashBlockHash> blockHashes) {
         return blockHashes.stream().map(blockHash -> new Request<>(
                 METHOD_GET_BLOCK,
                 Arrays.asList(blockHash.getBlockHash(), 2),
                 this.httpService,
-                LtcBlock.class)).collect(Collectors.toList());
+                HcashBlock.class)).collect(Collectors.toList());
     }
 
     @Override
@@ -193,4 +191,5 @@ public class LtcSnapshotServiceImpl extends AbstractSnapshotService {
     public int getBatchSize() {
         return batchSize;
     }
+
 }

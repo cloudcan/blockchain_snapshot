@@ -1,7 +1,6 @@
 package top.wangjc.blockchain_snapshot.service.impl;
 
 import io.reactivex.Flowable;
-import io.reactivex.schedulers.Schedulers;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.util.Strings;
 import org.bitcoinj.core.Context;
@@ -11,17 +10,15 @@ import org.bitcoinj.utils.BlockFileLoader;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import top.wangjc.blockchain_snapshot.document.BtcUTXODocument;
-import top.wangjc.blockchain_snapshot.repository.BtcUTXODocRepository;
-import top.wangjc.blockchain_snapshot.repository.BtcUTXORepository;
 import top.wangjc.blockchain_snapshot.repository.MongoRepositoryImpl;
 import top.wangjc.blockchain_snapshot.service.BlockChainService;
 import top.wangjc.blockchain_snapshot.utils.Counter;
+import top.wangjc.blockchain_snapshot.utils.TimePrint;
 
 import java.io.File;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListSet;
 
 /**
  * 比特币区块数据导入服务
@@ -29,14 +26,8 @@ import java.util.concurrent.ConcurrentSkipListSet;
 @Service
 @Slf4j
 public class BtcBlockImportServiceImpl implements BlockChainService {
-    // 找到的地址
-    private Set findAddresses = new ConcurrentSkipListSet();
 
     private Counter blockCounter;
-    @Autowired
-    private BtcUTXORepository btcUTXORepository;
-    @Autowired
-    private BtcUTXODocRepository btcUTXODocRepository;
 
     @Autowired
     private MongoRepositoryImpl mongoRepository;
@@ -58,13 +49,15 @@ public class BtcBlockImportServiceImpl implements BlockChainService {
         Flowable.fromIterable(loader)
 //                .parallel()
 //                .runOn(Schedulers.io())
-                .map(block -> {
+                .subscribe(block -> {
                     List<BtcUTXODocument> documents = new ArrayList<>();
                     List<String> outPoints = new ArrayList<>();
                     block.getTransactions().forEach(transaction -> {
-                        if (!transaction.isCoinBase()) {
-
-                        }
+//                        if (!transaction.isCoinBase()) {
+//                            transaction.getInputs().forEach(input -> {
+//                                outPoints.add(BtcUTXODocument.generateOutPoint(input.getOutpoint().getHash().toString(), input.getIndex()));
+//                            });
+//                        }
                         transaction.getOutputs().forEach(output -> {
                             String addressStr = "";
                             try {
@@ -73,25 +66,34 @@ public class BtcBlockImportServiceImpl implements BlockChainService {
                                 log.info("获取地址失败");
                             }
                             BtcUTXODocument document = new BtcUTXODocument();
-                            document.setTxHash(transaction.getHash().toString());
+                            document.setTxId(transaction.getTxId().toString());
                             document.setAddress(addressStr);
                             document.setSpentBlock(Strings.EMPTY);
                             document.setCoinBase(transaction.isCoinBase());
-                            document.setMintValue(output.getValue().getValue());
+                            document.setMintValue(BigDecimal.valueOf(output.getValue().getValue()));
                             document.setMintIndex(output.getIndex());
-                            document.setOutPoint(BtcUTXODocument.generateOutPoint(document.getTxHash(), document.getMintIndex()));
+                            document.setOutPoint(BtcUTXODocument.generateOutPoint(document.getTxId(), document.getMintIndex()));
                             documents.add(document);
                         });
                     });
-                    long l = System.currentTimeMillis();
+//                    TimePrint timePrint=new TimePrint();
                     mongoRepository.batchSave(documents);
-                    log.info("cost:{}", System.currentTimeMillis() - l);
+//                    timePrint.markPoint("save:");
+//                    mongoRepository.updateBtcUTXOByOutpoint(outPoints, block.getHashAsString());
+//                    timePrint.markPoint("update:");
                     blockCounter.increse();
-                    return "ok";
-                }).subscribe();
+                }, this::handleError, () -> log.info("-------task complete------------"));
 
     }
 
+    /**
+     * 处理错误
+     *
+     * @param e
+     */
+    protected void handleError(Throwable e) {
+        log.info("replay block error:", e);
+    }
 
     @Override
     public void restart() {
@@ -105,6 +107,11 @@ public class BtcBlockImportServiceImpl implements BlockChainService {
 
     @Override
     public ServiceStatus getServiceStatus() {
+        return null;
+    }
+
+    @Override
+    public String getServiceName() {
         return null;
     }
 }

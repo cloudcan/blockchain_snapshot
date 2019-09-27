@@ -12,6 +12,12 @@ public class Counter {
     private Timer timer;
     private String name;
 
+    public int getSpeed() {
+        return speed;
+    }
+
+    private int speed;
+
     public Counter(String name) {
         timer = new Timer();
         timer.scheduleAtFixedRate(new CounterTimerTask(), 0, 1 * 1000);
@@ -25,6 +31,11 @@ public class Counter {
 
     public void reset() {
         counter.set(0);
+        speed = 0;
+    }
+
+    public void close() {
+        timer.cancel();
     }
 
     public void increse() {
@@ -41,9 +52,9 @@ public class Counter {
         @Override
         public void run() {
             int counterValue = counter.get();
-            int speed = counterValue - lastValue;
+            speed = counterValue - lastValue;
             lastValue = counterValue;
-            log.info("============={} speed {}/second==========", name, speed);
+            log.info("============={} speed {}/second, counter  value :{}==========", name, speed, counterValue);
         }
     }
 }

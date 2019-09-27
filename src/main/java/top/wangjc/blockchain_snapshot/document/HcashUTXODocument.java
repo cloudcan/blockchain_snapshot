@@ -9,10 +9,9 @@ import javax.xml.bind.DatatypeConverter;
 import java.math.BigDecimal;
 import java.security.MessageDigest;
 
-@Document("ltc_utxo")
+@Document("hcash_utxo")
 @Data
-public class LtcUTXODocument {
-    @Id
+public class HcashUTXODocument {
     private String id;
     //    @Indexed
 //    private String blockHash;
